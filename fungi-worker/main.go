@@ -29,10 +29,11 @@ func main() {
 	}
 }
 
-func NewWorker(coord, id string) *Worker {
+func NewWorker(coord, id, secret string) *Worker {
 	return &Worker{
 		ID:          id,
 		Coordinator: coord,
+		AuthSecret:  secret,
 		JobLimiter:  make(chan struct{}, 1),
 		Results:     make(chan *fungi.JobResult, 16),
 	}
@@ -49,13 +50,20 @@ type Worker struct {
 
 var ErrNoMoreJobs = fmt.Errorf("coordinator had no available jobs")
 
+func (w *Worker) setHeaders(req *http.Request) {
+	req.Header.Set("worker-id", w.ID)
+	if w.AuthSecret != "" {
+		req.Header.Set("auth-secret", w.AuthSecret)
+	}
+}
+
 func (w *Worker) requestJob() (*fungi.JobAllocation, error) {
 	req, err := http.NewRequest("GET", w.Coordinator+"/jobs/new", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %s", err)
 	}
 
-	req.Header.Set("worker-id", w.ID)
+	w.setHeaders(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -90,7 +98,7 @@ func (w *Worker) Checkin(ja *fungi.JobAllocation) error {
 		return xerrors.Errorf("failed to create checkin request: %w", err)
 	}
 
-	req.Header.Set("worker-id", w.ID)
+	w.setHeaders(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -102,7 +110,7 @@ func (w *Worker) Checkin(ja *fungi.JobAllocation) error {
 }
 
 func (w *Worker) Execute(ja *fungi.JobAllocation) {
-	log.Println("starting job %d", ja.ID)
+	log.Printf("starting job %d", ja.ID)
 
 	cmd := exec.Command(ja.Config.Cmd, ja.Config.Args...)
 
@@ -137,7 +145,7 @@ func (w *Worker) SubmitResult(res *fungi.JobResult) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("worker-id", w.ID)
+	w.setHeaders(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -156,7 +164,8 @@ func (w *Worker) SayHello() error {
 		return xerrors.Errorf("failed to construct hello request: %w", err)
 	}
 
-	req.Header.Set("worker-id", w.ID)
+	w.setHeaders(req)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return xerrors.Errorf("request failed: %w", err)
@@ -231,6 +240,10 @@ var RunCmd = &cli.Command{
 			Name:  "id",
 			Usage: "manually specify ID for worker (optional)",
 		},
+		&cli.StringFlag{
+			Name:  "auth-secret",
+			Usage: "specify a secret that will be used to authenticate with the coordinator",
+		},
 	},
 	Action: func(cctx *cli.Context) error {
 		if !cctx.Args().Present() {
@@ -244,7 +257,7 @@ var RunCmd = &cli.Command{
 			id = makeRandomName()
 		}
 
-		w := NewWorker(curl, id)
+		w := NewWorker(curl, id, cctx.String("auth-secret"))
 
 		log.Printf("starting up worker %s", id)
 
