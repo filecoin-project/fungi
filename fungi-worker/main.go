@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -41,6 +41,7 @@ func NewWorker(coord, id string) *Worker {
 type Worker struct {
 	ID          string
 	Coordinator string
+	AuthSecret  string
 
 	JobLimiter chan struct{}
 	Results    chan *fungi.JobResult
@@ -84,13 +85,12 @@ func (w *Worker) requestJob() (*fungi.JobAllocation, error) {
 }
 
 func (w *Worker) Checkin(ja *fungi.JobAllocation) error {
-	req, err := http.NewRequest("GET", w.Coordinator+"/jobs/checkin", nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/jobs/%d/checkin", w.Coordinator, ja.ID), nil)
 	if err != nil {
 		return xerrors.Errorf("failed to create checkin request: %w", err)
 	}
 
 	req.Header.Set("worker-id", w.ID)
-	req.Header.Set("job-id", fmt.Sprint(ja.ID))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -102,6 +102,7 @@ func (w *Worker) Checkin(ja *fungi.JobAllocation) error {
 }
 
 func (w *Worker) Execute(ja *fungi.JobAllocation) {
+	log.Println("starting job %d", ja.ID)
 
 	cmd := exec.Command(ja.Config.Cmd, ja.Config.Args...)
 
@@ -130,13 +131,13 @@ func (w *Worker) SubmitResult(res *fungi.JobResult) error {
 		return xerrors.Errorf("failed to marshal job result: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", w.Coordinator+"/jobs/complete", bytes.NewReader(data))
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/jobs/%d/complete", w.Coordinator, res.JobID), bytes.NewReader(data))
 	if err != nil {
 		return xerrors.Errorf("failed to construct job result submission request: %w", err)
 	}
 
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("worker-id", w.ID)
-	req.Header.Set("job-id", fmt.Sprint(res.JobID))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -178,6 +179,7 @@ func (w *Worker) Run() {
 			if err != nil {
 				if err == ErrNoMoreJobs {
 					log.Println("server has no more jobs, sleeping 30 seconds and trying again...")
+					<-w.JobLimiter
 					time.Sleep(time.Second * 30)
 					continue
 				}

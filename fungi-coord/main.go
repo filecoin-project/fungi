@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -26,9 +24,11 @@ type Coordinator struct {
 
 	Completions int
 	Failures    int
+
+	AuthSecret string
 }
 
-func NewCoordinator(projectName string, jobsd, resd string) (*Coordinator, error) {
+func NewCoordinator(projectName string, jobsd, resd string, secret string) (*Coordinator, error) {
 	if err := ensureWritable(resd); err != nil {
 		return nil, fmt.Errorf("results directory was not writeable by the coordinator: %w", err)
 	}
@@ -44,6 +44,7 @@ func NewCoordinator(projectName string, jobsd, resd string) (*Coordinator, error
 		Project:    projectName,
 		ResultsDir: resd,
 		JobsDir:    jobsd,
+		AuthSecret: secret,
 	}
 
 	jobs := make(map[int]*Job)
@@ -156,108 +157,6 @@ func (c *Coordinator) writeResult(job int, res *fungi.JobResult) error {
 	return nil
 }
 
-func (c *Coordinator) handleHello(w http.ResponseWriter, r *http.Request) {
-	worker := r.Header.Get("worker-id")
-	if worker == "" {
-		http.Error(w, "must specify worker ID", 400)
-		return
-	}
-
-	log.Printf("got hello from worker %s", worker)
-	w.WriteHeader(200)
-}
-
-func (c *Coordinator) handleJobRequest(w http.ResponseWriter, r *http.Request) {
-	worker := r.Header.Get("worker-id")
-	if worker == "" {
-		http.Error(w, "must specify worker ID", 400)
-		return
-	}
-
-	jalloc, err := c.AllocateJob(worker)
-	if err != nil {
-		if err == ErrNoMoreJobs {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		log.Printf("failed to allocate job for worker %s: %s", worker, err)
-		http.Error(w, "failed to allocate job", 400)
-		return
-	}
-
-	if err := json.NewEncoder(w).Encode(jalloc); err != nil {
-		log.Printf("failed to send job allocation back to worker %s: %s", worker, err)
-		// TODO: unallocate job?
-		return
-	}
-}
-
-func (c *Coordinator) handleJobCheckin(w http.ResponseWriter, r *http.Request) {
-	worker := r.Header.Get("worker-id")
-	if worker == "" {
-		log.Println("got a checkin request without a worker ID")
-		http.Error(w, "must specify worker ID", 400)
-		return
-	}
-
-	job := r.Header.Get("job-id")
-	if job == "" {
-		log.Printf("got checkin request from worker %s without a job ID", worker)
-		http.Error(w, "must specify job ID", 400)
-		return
-	}
-
-	jobid, err := strconv.Atoi(job)
-	if err != nil {
-		log.Printf("failed to parse job ID (%q) for checkin from worker %s: %s", job, worker, err)
-		http.Error(w, "failed to parse job ID", 400)
-		return
-	}
-
-	c.RegisterCheckin(worker, jobid)
-}
-
-func (c *Coordinator) handleJobCompletion(w http.ResponseWriter, r *http.Request) {
-	worker := r.Header.Get("worker-id")
-	if worker == "" {
-		log.Println("got a checkin request without a worker ID")
-		http.Error(w, "must specify worker ID", 400)
-		return
-	}
-
-	job := r.Header.Get("job-id")
-	if job == "" {
-		log.Printf("got checkin request from worker %s without a job ID", worker)
-		http.Error(w, "must specify job ID", 400)
-		return
-	}
-
-	jobid, err := strconv.Atoi(job)
-	if err != nil {
-		log.Printf("failed to parse job ID (%q) for checkin from worker %s: %s", job, worker, err)
-		http.Error(w, "failed to parse job ID", 400)
-		return
-	}
-
-	var res fungi.JobResult
-	if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
-		log.Printf("failed to read job result for job %d from worker %s: %s", jobid, worker, err)
-		http.Error(w, "failed to read result", 400)
-		return
-	}
-
-	c.JobComplete(worker, jobid, &res)
-}
-
-func (c *Coordinator) ServeJobs(addr string) error {
-	http.HandleFunc("/jobs/new", c.handleJobRequest)
-	http.HandleFunc("/jobs/checkin", c.handleJobCheckin)
-	http.HandleFunc("/jobs/complete", c.handleJobCompletion)
-	http.HandleFunc("/hello", c.handleHello)
-
-	return http.ListenAndServe(addr, nil)
-}
-
 type Job struct {
 	Executor    string // the ID of the node currently running this job
 	StartTime   time.Time
@@ -321,6 +220,10 @@ var RunCmd = &cli.Command{
 			Name:  "project",
 			Usage: "Give a name to this particular set of work",
 		},
+		&cli.StringFlag{
+			Name:  "auth-secret",
+			Usage: "specify a secret that workers must use in order to connect",
+		},
 	},
 	Action: func(cctx *cli.Context) error {
 		jobsd := cctx.String("jobs-dir")
@@ -338,7 +241,7 @@ var RunCmd = &cli.Command{
 			project = "fungi"
 		}
 
-		c, err := NewCoordinator(project, jobsd, resd)
+		c, err := NewCoordinator(project, jobsd, resd, cctx.String("auth-secret"))
 		if err != nil {
 			return fmt.Errorf("failed to set up coordinator: %w", err)
 		}
