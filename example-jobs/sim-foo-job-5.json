@@ -1,0 +1,4 @@
+{
+ "Cmd": "python",
+ "Args": ["-c", "import time; time.sleep(20); print(\"5\")"]
+}
