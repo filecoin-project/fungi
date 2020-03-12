@@ -1,6 +1,6 @@
 # fungi
 
-A very simple distribute task runner.
+A very simple distributed task runner.
 
 
 # Architecture
