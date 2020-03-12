@@ -17,28 +17,31 @@ type FungiContext struct {
 
 func (c *Coordinator) ServeJobs(addr string) error {
 	e := echo.New()
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(ctx echo.Context) error {
-			if c.AuthSecret != "" {
-				auth := ctx.Request().Header.Get("auth-secret")
-				if auth != c.AuthSecret {
-					return fmt.Errorf("invalid auth token")
-				}
-			}
-			worker := ctx.Request().Header.Get("worker-id")
-			if worker == "" {
-				return fmt.Errorf("must specify worker ID")
-			}
+	e.Use(c.checkAuth)
 
-			return next(&FungiContext{Context: ctx, Worker: worker})
-		}
-	})
 	e.GET("/jobs/new", c.handleJobRequest)
 	e.GET("/jobs/:job/checkin", c.handleJobCheckin)
 	e.POST("/jobs/:job/complete", c.handleJobCompletion)
 	e.GET("/hello", c.handleHello)
 
 	return e.Start(addr)
+}
+
+func (c *Coordinator) checkAuth(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ctx echo.Context) error {
+		if c.AuthSecret != "" {
+			auth := ctx.Request().Header.Get("auth-secret")
+			if auth != c.AuthSecret {
+				return fmt.Errorf("invalid auth token")
+			}
+		}
+		worker := ctx.Request().Header.Get("worker-id")
+		if worker == "" {
+			return fmt.Errorf("must specify worker ID")
+		}
+
+		return next(&FungiContext{Context: ctx, Worker: worker})
+	}
 }
 
 func (c *Coordinator) handleHello(ectx echo.Context) error {
