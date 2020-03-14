@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/whyrusleeping/fungi"
+	"golang.org/x/xerrors"
 )
 
 type FungiContext struct {
@@ -20,7 +21,7 @@ func (c *Coordinator) ServeJobs(addr string) error {
 	e.Use(c.checkAuth)
 
 	e.GET("/jobs/new", c.handleJobRequest)
-	e.GET("/jobs/:job/checkin", c.handleJobCheckin)
+	e.POST("/jobs/checkin", c.handleJobCheckin)
 	e.POST("/jobs/:job/complete", c.handleJobCompletion)
 	e.GET("/hello", c.handleHello)
 
@@ -48,7 +49,10 @@ func (c *Coordinator) handleHello(ectx echo.Context) error {
 	ctx := ectx.(*FungiContext)
 
 	log.Printf("got hello from worker %s", ctx.Worker)
-	return ctx.String(200, "hello!")
+	hresp := &fungi.HelloResponse{
+		CheckinInterval: c.CheckinInterval,
+	}
+	return ctx.JSON(200, hresp)
 }
 
 func (c *Coordinator) handleJobRequest(ectx echo.Context) error {
@@ -85,12 +89,12 @@ func getJobID(ctx *FungiContext) (int, error) {
 func (c *Coordinator) handleJobCheckin(ectx echo.Context) error {
 	ctx := ectx.(*FungiContext)
 
-	jobid, err := getJobID(ctx)
-	if err != nil {
-		return err
+	var checkin fungi.CheckinBody
+	if err := ctx.Bind(&checkin); err != nil {
+		return xerrors.Errorf("failed to bind request body to proper type: %w", err)
 	}
 
-	c.RegisterCheckin(ctx.Worker, jobid)
+	c.RegisterCheckin(ctx.Worker, &checkin)
 	return nil
 }
 

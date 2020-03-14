@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
+	"sync"
 	"time"
 
 	"golang.org/x/xerrors"
@@ -29,13 +31,14 @@ func main() {
 	}
 }
 
-func NewWorker(coord, id, secret string) *Worker {
+func NewWorker(coord, id string, nworkers int, secret string) *Worker {
 	return &Worker{
-		ID:          id,
-		Coordinator: coord,
-		AuthSecret:  secret,
-		JobLimiter:  make(chan struct{}, 1),
-		Results:     make(chan *fungi.JobResult, 16),
+		ID:             id,
+		Coordinator:    coord,
+		AuthSecret:     secret,
+		JobLimiter:     make(chan struct{}, nworkers),
+		JobsInProgress: make(map[int]struct{}),
+		Results:        make(chan *fungi.JobResult, 16),
 	}
 }
 
@@ -43,6 +46,9 @@ type Worker struct {
 	ID          string
 	Coordinator string
 	AuthSecret  string
+
+	JobsInProgress map[int]struct{}
+	lk             sync.Mutex
 
 	JobLimiter chan struct{}
 	Results    chan *fungi.JobResult
@@ -92,13 +98,33 @@ func (w *Worker) requestJob() (*fungi.JobAllocation, error) {
 	return &alloc, nil
 }
 
-func (w *Worker) Checkin(ja *fungi.JobAllocation) error {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/jobs/%d/checkin", w.Coordinator, ja.ID), nil)
+func (w *Worker) getActiveJobs() []int {
+	var activeJobs []int
+	w.lk.Lock()
+	for j := range w.JobsInProgress {
+		activeJobs = append(activeJobs, j)
+	}
+	w.lk.Unlock()
+	sort.Ints(activeJobs)
+	log.Println("active jobs: ", activeJobs)
+	return activeJobs
+}
+
+func (w *Worker) Checkin() error {
+	data, err := json.Marshal(&fungi.CheckinBody{
+		Jobs: w.getActiveJobs(),
+	})
+	if err != nil {
+		return xerrors.Errorf("failed to marshal checkin body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/jobs/checkin", w.Coordinator), bytes.NewReader(data))
 	if err != nil {
 		return xerrors.Errorf("failed to create checkin request: %w", err)
 	}
 
 	w.setHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -109,8 +135,21 @@ func (w *Worker) Checkin(ja *fungi.JobAllocation) error {
 	return nil
 }
 
+func (w *Worker) markJobActive(id int, active bool) {
+	w.lk.Lock()
+	defer w.lk.Unlock()
+	log.Println("setting job activity: ", id, active)
+	if active {
+		w.JobsInProgress[id] = struct{}{}
+	} else {
+		delete(w.JobsInProgress, id)
+	}
+}
+
 func (w *Worker) Execute(ja *fungi.JobAllocation) {
 	log.Printf("starting job %d", ja.ID)
+	w.markJobActive(ja.ID, true)
+	defer w.markJobActive(ja.ID, false)
 
 	cmd := exec.Command(ja.Config.Cmd, ja.Config.Args...)
 
@@ -123,6 +162,7 @@ func (w *Worker) Execute(ja *fungi.JobAllocation) {
 			Output:  string(out),
 		}
 		w.Results <- res
+		return
 	}
 
 	w.Results <- &fungi.JobResult{
@@ -158,29 +198,34 @@ func (w *Worker) SubmitResult(res *fungi.JobResult) error {
 	return nil
 }
 
-func (w *Worker) SayHello() error {
+func (w *Worker) SayHello() (*fungi.HelloResponse, error) {
 	req, err := http.NewRequest("GET", w.Coordinator+"/hello", nil)
 	if err != nil {
-		return xerrors.Errorf("failed to construct hello request: %w", err)
+		return nil, xerrors.Errorf("failed to construct hello request: %w", err)
 	}
 
 	w.setHeaders(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return xerrors.Errorf("request failed: %w", err)
+		return nil, xerrors.Errorf("request failed: %w", err)
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("say hello returned http %d", resp.StatusCode)
+		return nil, fmt.Errorf("say hello returned http %d", resp.StatusCode)
 	}
-	return nil
 
+	var hello fungi.HelloResponse
+	if err := json.NewDecoder(resp.Body).Decode(&hello); err != nil {
+		return nil, fmt.Errorf("failed to decode hello response: %w", err)
+	}
+
+	return &hello, nil
 }
 
-func (w *Worker) Run() {
-	var checkinTick <-chan time.Time
-	var curJob *fungi.JobAllocation
+func (w *Worker) Run(checkinInterval time.Duration) {
+	checkinTick := time.Tick(checkinInterval)
 	for {
 		select {
 		case w.JobLimiter <- struct{}{}:
@@ -188,25 +233,21 @@ func (w *Worker) Run() {
 			if err != nil {
 				if err == ErrNoMoreJobs {
 					log.Println("server has no more jobs, sleeping 30 seconds and trying again...")
-					<-w.JobLimiter
-					time.Sleep(time.Second * 30)
+					go func() {
+						time.Sleep(time.Second * 30)
+						<-w.JobLimiter
+					}()
 					continue
 				}
 				log.Printf("got error from request job: %s", err)
 				return
 			}
 
-			cinterval := ja.CheckinInterval
-			if cinterval == 0 {
-				cinterval = time.Second * 10
-			}
-
-			checkinTick = time.Tick(cinterval) // todo: this is a leak, fix
 			go w.Execute(ja)
-			curJob = ja
 
 		case <-checkinTick:
-			if err := w.Checkin(curJob); err != nil {
+			log.Printf("checkin time!")
+			if err := w.Checkin(); err != nil {
 				log.Printf("checkin with coordinator failed: %s", err)
 			}
 		case res := <-w.Results:
@@ -214,8 +255,6 @@ func (w *Worker) Run() {
 			if err := w.SubmitResult(res); err != nil {
 				log.Printf("failed to submit result for job %d: %s", res.JobID, err)
 			}
-			curJob = nil
-			checkinTick = nil
 		}
 
 	}
@@ -244,6 +283,11 @@ var RunCmd = &cli.Command{
 			Name:  "auth-secret",
 			Usage: "specify a secret that will be used to authenticate with the coordinator",
 		},
+		&cli.IntFlag{
+			Name:  "task-count",
+			Usage: "specify the number of tasks the worker will work on at a time",
+			Value: 1,
+		},
 	},
 	Action: func(cctx *cli.Context) error {
 		if !cctx.Args().Present() {
@@ -257,15 +301,17 @@ var RunCmd = &cli.Command{
 			id = makeRandomName()
 		}
 
-		w := NewWorker(curl, id, cctx.String("auth-secret"))
+		w := NewWorker(curl, id, cctx.Int("task-count"), cctx.String("auth-secret"))
 
 		log.Printf("starting up worker %s", id)
 
-		if err := w.SayHello(); err != nil {
+		hresp, err := w.SayHello()
+		if err != nil {
 			return fmt.Errorf("failed to say hello to coordinator: %s", err)
 		}
 
-		w.Run()
+		log.Printf("server checkin interval is: %s", hresp.CheckinInterval)
+		w.Run(hresp.CheckinInterval)
 		return nil
 	},
 }

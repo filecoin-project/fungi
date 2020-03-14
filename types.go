@@ -86,7 +86,14 @@ func parseJobFileName(fn string) (string, int, error) {
 }
 
 type JobAllocation struct {
-	Config          *JobConfig
-	ID              int
+	Config *JobConfig
+	ID     int
+}
+
+type HelloResponse struct {
 	CheckinInterval time.Duration
+}
+
+type CheckinBody struct {
+	Jobs []int
 }

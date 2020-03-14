@@ -25,12 +25,17 @@ type Coordinator struct {
 	Completions int
 	Failures    int
 
-	AuthSecret string
+	AuthSecret      string
+	CheckinInterval time.Duration
 }
 
-func NewCoordinator(projectName string, jobsd, resd string, secret string) (*Coordinator, error) {
+func NewCoordinator(projectName string, jobsd, resd string, secret string, chint time.Duration) (*Coordinator, error) {
 	if err := ensureWritable(resd); err != nil {
 		return nil, fmt.Errorf("results directory was not writeable by the coordinator: %w", err)
+	}
+
+	if chint <= 0 {
+		return nil, fmt.Errorf("invalid checkin interval: %s", chint)
 	}
 
 	jcfgs, err := fungi.LoadJobs(jobsd)
@@ -41,10 +46,11 @@ func NewCoordinator(projectName string, jobsd, resd string, secret string) (*Coo
 	log.Printf("coordinator loaded %d jobs", len(jcfgs))
 
 	c := &Coordinator{
-		Project:    projectName,
-		ResultsDir: resd,
-		JobsDir:    jobsd,
-		AuthSecret: secret,
+		Project:         projectName,
+		ResultsDir:      resd,
+		JobsDir:         jobsd,
+		AuthSecret:      secret,
+		CheckinInterval: chint,
 	}
 
 	jobs := make(map[int]*Job)
@@ -75,9 +81,8 @@ func (c *Coordinator) AllocateJob(worker string) (*fungi.JobAllocation, error) {
 
 			log.Printf("assigning job %d to worker %s", j.JobID, worker)
 			return &fungi.JobAllocation{
-				Config:          j.Config,
-				ID:              j.JobID,
-				CheckinInterval: time.Second * 5,
+				Config: j.Config,
+				ID:     j.JobID,
 			}, nil
 		}
 	}
@@ -85,17 +90,19 @@ func (c *Coordinator) AllocateJob(worker string) (*fungi.JobAllocation, error) {
 	return nil, ErrNoMoreJobs
 }
 
-func (c *Coordinator) RegisterCheckin(worker string, job int) {
+func (c *Coordinator) RegisterCheckin(worker string, checkin *fungi.CheckinBody) {
 	c.lk.Lock()
 	defer c.lk.Unlock()
-	j, ok := c.Jobs[job]
-	if !ok {
-		log.Printf("attempted to register checkin for job that didnt exist")
-		return
-	}
+	for _, job := range checkin.Jobs {
+		j, ok := c.Jobs[job]
+		if !ok {
+			log.Printf("attempted to register checkin for job that didnt exist")
+			return
+		}
 
-	log.Printf("worker %s checking in on job %d. Time elapsed: %s", worker, job, time.Since(j.StartTime))
-	j.LastCheckin = time.Now()
+		log.Printf("worker %s checking in on job %d. Time elapsed: %s", worker, job, time.Since(j.StartTime))
+		j.LastCheckin = time.Now()
+	}
 }
 
 func (c *Coordinator) JobComplete(worker string, job int, result *fungi.JobResult) {
@@ -224,6 +231,11 @@ var RunCmd = &cli.Command{
 			Name:  "auth-secret",
 			Usage: "specify a secret that workers must use in order to connect",
 		},
+		&cli.DurationFlag{
+			Name:  "checkin-interval",
+			Usage: "specify how often workers should check in",
+			Value: time.Second * 5,
+		},
 	},
 	Action: func(cctx *cli.Context) error {
 		jobsd := cctx.String("jobs-dir")
@@ -241,7 +253,7 @@ var RunCmd = &cli.Command{
 			project = "fungi"
 		}
 
-		c, err := NewCoordinator(project, jobsd, resd, cctx.String("auth-secret"))
+		c, err := NewCoordinator(project, jobsd, resd, cctx.String("auth-secret"), cctx.Duration("checkin-interval"))
 		if err != nil {
 			return fmt.Errorf("failed to set up coordinator: %w", err)
 		}
