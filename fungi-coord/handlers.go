@@ -104,7 +104,7 @@ func (c *Coordinator) handleJobRequest(ectx echo.Context) error {
 	jalloc, err := c.AllocateJob(ctx.Worker)
 	if err != nil {
 		if err == ErrNoMoreJobs {
-			return ctx.String(http.StatusNoContent, "no available jobs")
+			return ctx.NoContent(http.StatusNoContent)
 		}
 		log.Printf("failed to allocate job for worker %s: %s", ctx.Worker, err)
 		return fmt.Errorf("failed to allocate job")

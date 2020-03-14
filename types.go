@@ -50,7 +50,6 @@ func LoadJobs(dir string) (map[int]*JobConfig, error) {
 
 	jobs := make(map[int]*JobConfig)
 	for _, fn := range names {
-		fmt.Println("name: ", fn)
 		job, err := LoadJobConfig(filepath.Join(dir, fn))
 		if err != nil {
 			return nil, xerrors.Errorf("failed to load job config: %w", err)

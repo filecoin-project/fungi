@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +66,62 @@ func NewCoordinator(projectName string, jobsd, resd string, secret string, chint
 	// TODO: scan results directory to find already completed tasks
 	c.Jobs = jobs
 
+	if err := c.checkExistingResults(); err != nil {
+		return nil, xerrors.Errorf("failed to check existing job results: %w", err)
+	}
+
 	return c, nil
+}
+
+func (c *Coordinator) checkExistingResults() error {
+	resd, err := os.Open(c.ResultsDir)
+	if err != nil {
+		return err
+	}
+	defer resd.Close()
+
+	names, err := resd.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+
+	for _, n := range names {
+		s, job, err := parseResultFileName(n)
+		if err != nil {
+			return err
+		}
+		log.Printf("sim %s job %d already complete", s, job)
+		j, ok := c.Jobs[job]
+		if !ok {
+			log.Printf("have result file for job we don't know about: %s", n)
+		} else {
+			j.Complete = true
+		}
+	}
+
+	return nil
+}
+
+func parseResultFileName(fn string) (string, int, error) {
+	if !strings.HasPrefix(fn, "sim-") {
+		return "", 0, fmt.Errorf("incorrectly formatted name, must match format sim-SIMNAME-job-JOBID.json")
+	}
+
+	suff := "-results.json"
+	if !strings.HasSuffix(fn, suff) {
+		return "", 0, fmt.Errorf("incorrectly formatted name, must match format sim-SIMNAME-job-JOBID-result.json")
+	}
+
+	fn = fn[:len(fn)-len(suff)]
+	n := strings.LastIndex(fn, "-")
+	jobstr := fn[n+1:]
+
+	jobid, err := strconv.Atoi(jobstr)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to parse job id from name: %s", err)
+	}
+
+	return fn[4:n], jobid, nil
 }
 
 var ErrNoMoreJobs = fmt.Errorf("no more available jobs")
