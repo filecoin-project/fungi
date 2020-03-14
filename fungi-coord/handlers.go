@@ -18,12 +18,22 @@ type FungiContext struct {
 
 func (c *Coordinator) ServeJobs(addr string) error {
 	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			if err := next(ctx); err != nil {
+				log.Println("got error: ", err)
+			}
+			return nil
+		}
+	})
 	e.Use(c.checkAuth)
+	e.GET("/stats", c.handleStats)
 
-	e.GET("/jobs/new", c.handleJobRequest)
-	e.POST("/jobs/checkin", c.handleJobCheckin)
-	e.POST("/jobs/:job/complete", c.handleJobCompletion)
-	e.GET("/hello", c.handleHello)
+	j := e.Group("/jobs", c.extractWorker)
+	j.GET("/new", c.handleJobRequest)
+	j.POST("/checkin", c.handleJobCheckin)
+	j.POST("/:job/complete", c.handleJobCompletion)
+	j.GET("/hello", c.handleHello)
 
 	return e.Start(addr)
 }
@@ -36,6 +46,12 @@ func (c *Coordinator) checkAuth(next echo.HandlerFunc) echo.HandlerFunc {
 				return fmt.Errorf("invalid auth token")
 			}
 		}
+		return next(ctx)
+	}
+}
+
+func (c *Coordinator) extractWorker(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ctx echo.Context) error {
 		worker := ctx.Request().Header.Get("worker-id")
 		if worker == "" {
 			return fmt.Errorf("must specify worker ID")
@@ -43,6 +59,33 @@ func (c *Coordinator) checkAuth(next echo.HandlerFunc) echo.HandlerFunc {
 
 		return next(&FungiContext{Context: ctx, Worker: worker})
 	}
+}
+
+type FungiStats struct {
+	CompletedJobs  int
+	InProgressJobs int
+	TotalJobs      int
+	Failures       int
+	Workers        []string
+}
+
+func (c *Coordinator) handleStats(ctx echo.Context) error {
+	c.lk.Lock()
+
+	var stats FungiStats
+	for _, j := range c.Jobs {
+		stats.TotalJobs++
+		stats.Failures += j.Failures
+
+		if j.Complete {
+			stats.CompletedJobs++
+		} else if j.Executor != "" {
+			stats.InProgressJobs++
+		}
+	}
+	c.lk.Unlock()
+
+	return ctx.JSON(200, &stats)
 }
 
 func (c *Coordinator) handleHello(ectx echo.Context) error {

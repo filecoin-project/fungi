@@ -199,7 +199,7 @@ func (w *Worker) SubmitResult(res *fungi.JobResult) error {
 }
 
 func (w *Worker) SayHello() (*fungi.HelloResponse, error) {
-	req, err := http.NewRequest("GET", w.Coordinator+"/hello", nil)
+	req, err := http.NewRequest("GET", w.Coordinator+"/jobs/hello", nil)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to construct hello request: %w", err)
 	}
