@@ -285,13 +285,14 @@ var RunCmd = &cli.Command{
 			Usage: "Give a name to this particular set of work",
 		},
 		&cli.StringFlag{
-			Name:  "auth-secret",
-			Usage: "specify a secret that workers must use in order to connect",
+			Name:    "auth-secret",
+			EnvVars: []string{"FUNGUS_AUTH_SECRET"},
+			Usage:   "specify a secret that workers must use in order to connect",
 		},
 		&cli.DurationFlag{
 			Name:  "checkin-interval",
 			Usage: "specify how often workers should check in",
-			Value: time.Second * 5,
+			Value: time.Second * 15,
 		},
 	},
 	Action: func(cctx *cli.Context) error {
