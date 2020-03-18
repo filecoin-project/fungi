@@ -280,8 +280,9 @@ var RunCmd = &cli.Command{
 			Usage: "manually specify ID for worker (optional)",
 		},
 		&cli.StringFlag{
-			Name:  "auth-secret",
-			Usage: "specify a secret that will be used to authenticate with the coordinator",
+			Name:    "auth-secret",
+			EnvVars: []string{"FUNGI_AUTH_SECRET"},
+			Usage:   "specify a secret that will be used to authenticate with the coordinator",
 		},
 		&cli.IntFlag{
 			Name:  "task-count",
