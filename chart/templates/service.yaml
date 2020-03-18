@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{ .Release.Name }}-fungi-coord-service"
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "{{ .Values.coord.service.external.ACM }}"
+    external-dns.alpha.kubernetes.io/hostname: "{{ .Values.coord.service.external.hostname}}"
+    external-dns.alpha.kubernetes.io/alias: "true"
+    external-dns.alpha.kubernetes.io/ttl: "60"
+spec:
+  type: {{ .Values.coord.service.external.type }}
+  selector:
+    appRelease: {{ .Release.Name }}-fungi-coord
+  ports:
+    - protocol: TCP
+      port: {{ .Values.coord.service.external.port }}
+      targetPort: {{ .Values.coord.service.external.targetPort }}
+      name: api
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{ .Release.Name }}-fungi-coord-service-internal"
+spec:
+  type: {{ .Values.coord.service.internal.type }}
+  selector:
+    appRelease: {{ .Release.Name }}-fungi-coord
+  ports:
+    - protocol: TCP
+      port: {{ .Values.coord.service.internal.targetPort }}
+      targetPort: {{ .Values.coord.service.internal.targetPort }}
+      name: api

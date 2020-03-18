@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-fungi-coord
+  labels:
+    app: fungi-coord
+spec:
+  replicas: {{ .Values.coord.replicaCount }}
+  serviceName: {{ template "chart.servicename" . }}
+  selector:
+    matchLabels:
+      app: fungi-coord
+  template:
+    metadata:
+      labels:
+        app: fungi-coord
+        appRelease: {{ .Release.Name }}-fungi-coord
+        chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+        heritage: {{ .Release.Service }}
+        release: {{ .Release.Name }}
+    spec:
+{{- if .Values.securityContext.runAsNonRoot }}
+      securityContext:
+        # The image runs as uid 1000 by default, and needs to be able to write to
+        # the persistent volume to be able to start.
+        fsGroup: {{ .Values.podSecurityContext.fsGroup }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+{{- end }}
+      initContainers:
+      - name: ensure-directories
+        image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+        command: ["/bin/sh", "-c", "mkdir -p /coord/jobs && mkdir -p /coord/results"]
+        volumeMounts:
+          - name: {{ .Release.Name }}-coord-vol
+            mountPath: /coord
+{{- if .Values.coord.generateConfigs.enabled }}
+      - name: generate-configs
+        image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+        command: ["echo"]
+        volumeMounts:
+          - name: {{ .Release.Name }}-coord-vol
+            mountPath: /coord
+{{- end }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+        command: [
+          "/usr/local/bin/coord", "run",
+           "--jobs-dir", "/coord/jobs",
+           "--results-dir", "/coord/results",
+        ]
+        #command: ["tail", "-f", "/dev/null"]
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+{{- if .Values.secretName }}
+          - name: FUNGI_AUTH_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.secretName }}"
+                key: "{{ .Values.secretKey }}"
+{{- end }}
+        ports:
+        - containerPort: 5292
+          name: api
+        volumeMounts:
+          - name: {{ .Release.Name }}-coord-vol
+            mountPath: /coord
+        resources:
+{{ toYaml .Values.coord.resources | indent 10 }}
+      nodeSelector:
+{{ toYaml .Values.coord.nodeSelector | indent 8 }}
+      affinity:
+{{ toYaml .Values.coord.affinity | indent 8 }}
+      tolerations:
+{{ toYaml .Values.coord.tolerations | indent 8 }}
+  {{- if .Values.coord.persistence.coord.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: {{ .Release.Name }}-coord-vol
+        {{- range $key, $value := .Values.coord.persistence.coord.annotations }}
+            {{ $key }}: {{ $value }}
+        {{- end }}
+      spec:
+        accessModes:
+            {{- range .Values.coord.persistence.coord.accessModes }}
+            - {{ . | quote }}
+            {{- end }}
+        resources:
+            requests:
+                storage: {{ .Values.coord.persistence.coord.size | quote }}
+        {{- if .Values.coord.persistence.coord.storageClassName }}
+        {{- if (eq "-" .Values.coord.persistence.coord.storageClassName) }}
+        storageClassName: ""
+        {{- else }}
+        storageClassName: "{{ .Values.coord.persistence.coord.storageClassName }}"
+        {{- end }}
+        {{- end }}
+  {{- end }}

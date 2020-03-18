@@ -1,0 +1,73 @@
+# Default values for chart.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  repository: ognots/fungi
+  pullPolicy: Always #IfNotPresent
+
+secretName: fungi-credentials
+secretKey: secret
+
+coord:
+  replicaCount: 1
+  generateConfigs:
+    enabled: false
+  service:
+    external:
+      type: LoadBalancer
+      port: 443
+      targetPort: 5292
+      # SET ME WHEN USING AWS
+      ACM:
+      hostname: fungi.kittyhawk.wtf
+    internal:
+      type: ClusterIP
+      port: 5292
+      targetPort: 5292
+  persistence:
+    enabled: true
+    coord:
+      size: "240Gi"
+      storageClassName: gp2
+      accessModes:
+        - ReadWriteOnce
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  resources: #{}
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 3000m
+      memory: 12Gi
+
+spore:
+  replicaCount: 1
+  taskCount: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  resources: #{}
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 3000m
+      memory: 12Gi
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podSecurityContext:
+  fsGroup: 100
+
+securityContext:
+  # capabilities:
+  #   drop:
+  #   - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
+  runAsUser: 1000

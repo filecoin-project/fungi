@@ -281,7 +281,7 @@ var RunCmd = &cli.Command{
 		},
 		&cli.StringFlag{
 			Name:    "auth-secret",
-			EnvVars: []string{"FUNGUS_AUTH_SECRET"},
+			EnvVars: []string{"FUNGI_AUTH_SECRET"},
 			Usage:   "specify a secret that will be used to authenticate with the coordinator",
 		},
 		&cli.IntFlag{
