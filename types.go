@@ -19,7 +19,7 @@ type JobConfig struct {
 type JobResult struct {
 	JobID   int
 	Success bool
-	Output  string
+	Output  []byte
 }
 
 func LoadJobConfig(fn string) (*JobConfig, error) {

@@ -159,7 +159,7 @@ func (w *Worker) Execute(ja *fungi.JobAllocation) {
 		res := &fungi.JobResult{
 			JobID:   ja.ID,
 			Success: false,
-			Output:  string(out),
+			Output:  out,
 		}
 		w.Results <- res
 		return
@@ -168,7 +168,7 @@ func (w *Worker) Execute(ja *fungi.JobAllocation) {
 	w.Results <- &fungi.JobResult{
 		JobID:   ja.ID,
 		Success: true,
-		Output:  string(out),
+		Output:  out,
 	}
 }
 

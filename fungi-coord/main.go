@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -215,7 +214,7 @@ func (c *Coordinator) writeResult(job int, res *fungi.JobResult) error {
 	}
 	defer fi.Close()
 
-	if err := json.NewEncoder(fi).Encode(res); err != nil {
+	if _, err := fi.Write(res.Output); err != nil {
 		return xerrors.Errorf("failed to write result to file: %w", err)
 	}
 	return nil
