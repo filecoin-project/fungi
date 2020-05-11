@@ -1,3 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-generate-configs"
+data:
+  generate-configs.sh: |
+    #!/bin/bash
+    JOB_DIR="/coord/jobs"
+    if [ "$(ls -A $JOB_DIR)" ]; then
+      echo "jobs already generated"
+    else
+      filecoin-jobgen -i /build/examples/filecoin/jobgen/metajob-large.json -o $JOB_DIR
+    fi
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -19,6 +33,11 @@ spec:
         heritage: {{ .Release.Service }}
         release: {{ .Release.Name }}
     spec:
+      volumes:
+        - name: generate-configs
+          configMap:
+            name: {{ .Release.Name }}-generate-configs
+            defaultMode: 0777
 {{- if .Values.securityContext.runAsNonRoot }}
       securityContext:
         # The image runs as uid 1000 by default, and needs to be able to write to
@@ -36,10 +55,13 @@ spec:
 {{- if .Values.coord.generateConfigs.enabled }}
       - name: generate-configs
         image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
-        command: ["echo"]
+        command: ["/script/generate-configs.sh"]
         volumeMounts:
           - name: {{ .Release.Name }}-coord-vol
             mountPath: /coord
+          - name: generate-configs
+            mountPath: /script/generate-configs.sh
+            subPath: generate-configs.sh
 {{- end }}
       containers:
       - name: {{ .Chart.Name }}
@@ -73,7 +95,7 @@ spec:
 {{ toYaml .Values.coord.affinity | indent 8 }}
       tolerations:
 {{ toYaml .Values.coord.tolerations | indent 8 }}
-  {{- if .Values.coord.persistence.coord.enabled }}
+{{- if .Values.coord.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: {{ .Release.Name }}-coord-vol
