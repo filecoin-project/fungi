@@ -106,9 +106,9 @@ func parseResultFileName(fn string) (string, int, error) {
 		return "", 0, fmt.Errorf("incorrectly formatted name, must match format sim-SIMNAME-job-JOBID.json")
 	}
 
-	suff := "-results.json"
+	suff := "-results"
 	if !strings.HasSuffix(fn, suff) {
-		return "", 0, fmt.Errorf("incorrectly formatted name, must match format sim-SIMNAME-job-JOBID-result.json")
+		return "", 0, fmt.Errorf("incorrectly formatted name, must match format sim-SIMNAME-job-JOBID-results")
 	}
 
 	fn = fn[:len(fn)-len(suff)]
@@ -207,7 +207,7 @@ func (c *Coordinator) JobComplete(worker string, job int, result *fungi.JobResul
 }
 
 func (c *Coordinator) writeResult(job int, res *fungi.JobResult) error {
-	fname := filepath.Join(c.ResultsDir, fmt.Sprintf("sim-%s-job-%d-results.json", c.Project, job))
+	fname := filepath.Join(c.ResultsDir, fmt.Sprintf("sim-%s-job-%d-results", c.Project, job))
 	fi, err := os.Create(fname)
 	if err != nil {
 		return xerrors.Errorf("failed to create results file: %w", err)
