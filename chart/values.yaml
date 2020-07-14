@@ -4,7 +4,8 @@
 
 image:
   repository: ognots/fungi
-  pullPolicy: Always #IfNotPresent
+  #repository: ognots/filecoin-cad-cad
+  pullPolicy: IfNotPresent #Always
 
 secretName: fungi-credentials
 secretKey: secret
@@ -12,7 +13,7 @@ secretKey: secret
 coord:
   replicaCount: 1
   generateConfigs:
-    enabled: false
+    enabled: true
   service:
     external:
       type: LoadBalancer
@@ -34,28 +35,28 @@ coord:
         - ReadWriteOnce
   nodeSelector: {}
   tolerations: []
+  #tolerations:
+  #    - key: "worker"
+  #      operator: "Equal"
+  #      value: "false"
+  #      effect: "NoSchedule"
+  #    - key: "worker"
+  #      operator: "Equal"
+  #      value: "false"
+  #      effect: "NoExecute"
   affinity: {}
-  resources: #{}
-    requests:
-      cpu: 1000m
-      memory: 4Gi
-    limits:
-      cpu: 3000m
-      memory: 12Gi
+  resources: {}
 
 spore:
-  replicaCount: 1
-  taskCount: 1
+  replicaCount: 8
+  taskCount: 4
   nodeSelector: {}
   tolerations: []
   affinity: {}
-  resources: #{}
+  resources:
     requests:
-      cpu: 1000m
-      memory: 4Gi
-    limits:
-      cpu: 3000m
-      memory: 12Gi
+      cpu: 4000m
+      memory: 20Gi
 
 imagePullSecrets: []
 nameOverride: ""
