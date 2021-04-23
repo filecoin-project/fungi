@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/labstack/echo/v4"
@@ -67,9 +68,12 @@ type FungiStats struct {
 	TotalJobs      int
 	Failures       int
 	Workers        []string
+	JobsInProgress []int
 }
 
 func (c *Coordinator) handleStats(ctx echo.Context) error {
+	workers := make(map[string]struct{})
+
 	c.lk.Lock()
 
 	var stats FungiStats
@@ -80,10 +84,20 @@ func (c *Coordinator) handleStats(ctx echo.Context) error {
 		if j.Complete {
 			stats.CompletedJobs++
 		} else if j.Executor != "" {
+			workers[j.Executor] = struct{}{}
 			stats.InProgressJobs++
+			stats.JobsInProgress = append(stats.JobsInProgress, j.JobID)
 		}
 	}
+
 	c.lk.Unlock()
+
+	out := make([]string, 0, len(workers))
+	for k := range workers {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	stats.Workers = out
 
 	return ctx.JSON(200, &stats)
 }
